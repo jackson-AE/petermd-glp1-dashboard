@@ -439,6 +439,17 @@ const demoEmb=[
 ].map(r=>({"Received At":r[0],"Event":"quiz_started","Page Key":"weight_improvement_goals","Contact ID":r[1],"UTM Source":r[2],"UTM Campaign":r[3],"UTM Term":r[4],"UTM Content":r[5],"URL":r[6]}));
 
 function apiPath(path){return (location.protocol==="file:"?"http://127.0.0.1:8787":"")+path}
+async function fetchJsonWithTimeout(url,timeoutMs,label){
+  const controller=typeof AbortController!=="undefined"?new AbortController():null;
+  const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
+  try{
+    const response=await fetch(url,{cache:"no-store",credentials:"same-origin",signal:controller?controller.signal:undefined});
+    if(!response.ok)throw new Error((label||"API")+" failed: "+response.status);
+    return await response.json();
+  }finally{
+    if(timer)clearTimeout(timer);
+  }
+}
 function esc(value){return String(value==null?"":value).replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]))}
 function num(value){const n=Number(String(value||0).replace(/[$,%\s,]/g,""));return Number.isFinite(n)?n:0}
 function fmt(n){return Math.round(n).toLocaleString()}
@@ -603,21 +614,19 @@ function hideLogin(){
   $("logoutBtn").classList.add("hidden");
 }
 async function loadData(){
-  const adResponse=await fetch(CONFIG.adDataUrl,{cache:"no-store",credentials:"same-origin"});
-  if(!adResponse.ok)throw new Error("Reporting API failed: "+adResponse.status);
-  const adPayload=await adResponse.json();
-  let funnelPayload={gaRows:[],embRows:[],dataUpdatedAt:"",updatedAt:""};
-  try{
-    const funnelResponse=await fetch(CONFIG.dataUrl,{cache:"no-store",credentials:"same-origin"});
-    if(funnelResponse.ok)funnelPayload=await funnelResponse.json();
-  }catch(error){
-    console.warn("Funnel data unavailable; keeping demo funnel rows for now.",error);
-  }
-  const gaRows=funnelPayload.gaRows&&funnelPayload.gaRows.length?funnelPayload.gaRows:demoGa;
-  const embRows=funnelPayload.embRows&&funnelPayload.embRows.length?funnelPayload.embRows:demoEmb;
+  const [adPayload,funnelPayload]=await Promise.all([
+    fetchJsonWithTimeout(CONFIG.adDataUrl,28000,"Reporting API"),
+    fetchJsonWithTimeout(CONFIG.dataUrl,9000,"Funnel API").catch(error=>{
+      console.warn("Funnel data unavailable; keeping demo funnel rows for now.",error);
+      return {gaRows:[],embRows:[],dataUpdatedAt:"",updatedAt:""};
+    })
+  ]);
+  const hasLiveFunnel=Boolean((funnelPayload.gaRows&&funnelPayload.gaRows.length)||(funnelPayload.embRows&&funnelPayload.embRows.length));
+  const gaRows=hasLiveFunnel?funnelPayload.gaRows:demoGa;
+  const embRows=hasLiveFunnel?funnelPayload.embRows:demoEmb;
   const ads=mapAdRows(adPayload.rows||[]).filter(row=>row.offer===CONFIG.marketingOffer);
   DATA_TS=adPayload.dataUpdatedAt||adPayload.updatedAt||funnelPayload.dataUpdatedAt||funnelPayload.updatedAt||"";
-  return {ga:gaRows,emb:embRows,ads,funnelDemo:!(funnelPayload.gaRows&&funnelPayload.gaRows.length&&funnelPayload.embRows&&funnelPayload.embRows.length)};
+  return {ga:gaRows,emb:embRows,ads,funnelDemo:!hasLiveFunnel};
 }
 function useDemo(){
   DEMO_MODE=true;
