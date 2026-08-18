@@ -7,6 +7,10 @@ const CONFIG = {
   reportingDataGid: Number(process.env.PETERMD_REPORTING_DATA_GID || 372008856),
   appsScriptUrl: process.env.PETERMD_APPS_SCRIPT_URL || "",
   appsScriptSecret: process.env.PETERMD_APPS_SCRIPT_SECRET || "",
+  appsScriptOffer: process.env.PETERMD_APPS_SCRIPT_OFFER || "GLP1",
+  appsScriptColumns: process.env.PETERMD_APPS_SCRIPT_COLUMNS || "marketing",
+  appsScriptTimeoutMs: Number(process.env.PETERMD_APPS_SCRIPT_TIMEOUT_MS || 15000),
+  appsScriptAttempts: Number(process.env.PETERMD_APPS_SCRIPT_ATTEMPTS || 1),
   dashboardPassword: process.env.PETERMD_DASHBOARD_PASSWORD || "",
 };
 
@@ -64,6 +68,9 @@ function requestJson(method, url, { headers = {}, body = null, redirects = 0 } =
       });
     });
     req.on("error", reject);
+    req.setTimeout(CONFIG.appsScriptTimeoutMs, () => {
+      req.destroy(new Error(`Google Apps Script timed out after ${CONFIG.appsScriptTimeoutMs}ms`));
+    });
     if (body) req.write(body);
     req.end();
   });
@@ -152,9 +159,11 @@ async function loadReportingData() {
   if (CONFIG.appsScriptUrl && CONFIG.appsScriptSecret) {
     const url = new URL(CONFIG.appsScriptUrl);
     url.searchParams.set("key", CONFIG.appsScriptSecret);
+    if (CONFIG.appsScriptOffer) url.searchParams.set("offer", CONFIG.appsScriptOffer);
+    if (CONFIG.appsScriptColumns) url.searchParams.set("columns", CONFIG.appsScriptColumns);
     let lastError = null;
 
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; attempt <= CONFIG.appsScriptAttempts; attempt += 1) {
       try {
         const payload = await requestJson("GET", url.toString());
         if (payload.error) {
@@ -170,7 +179,7 @@ async function loadReportingData() {
         return data;
       } catch (err) {
         lastError = err;
-        if (attempt < 3) await wait(700 * attempt);
+        if (attempt < CONFIG.appsScriptAttempts) await wait(700 * attempt);
       }
     }
 

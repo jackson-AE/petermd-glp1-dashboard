@@ -6,6 +6,9 @@ const CONFIG = {
   spreadsheetId: process.env.PETERMD_SPREADSHEET_ID || "1pNGN8v3Q_1WSdpwwdvyZ25vlGFAVZifCBtJgCF7Etrw",
   appsScriptUrl: process.env.PETERMD_APPS_SCRIPT_URL || "",
   appsScriptSecret: process.env.PETERMD_APPS_SCRIPT_SECRET || "",
+  appsScriptTimeoutMs: Number(process.env.PETERMD_FUNNEL_TIMEOUT_MS || 8000),
+  appsScriptAttempts: Number(process.env.PETERMD_FUNNEL_ATTEMPTS || 1),
+  funnelDataSheetName: process.env.PETERMD_FUNNEL_DATA_SHEET || "Funnel Data",
   dashboardPassword: process.env.PETERMD_DASHBOARD_PASSWORD || "",
 };
 
@@ -53,6 +56,9 @@ function requestJson(method, url, { headers = {}, body = null, redirects = 0 } =
       });
     });
     req.on("error", reject);
+    req.setTimeout(CONFIG.appsScriptTimeoutMs, () => {
+      req.destroy(new Error(`Google Apps Script timed out after ${CONFIG.appsScriptTimeoutMs}ms`));
+    });
     if (body) req.write(body);
     req.end();
   });
@@ -136,13 +142,56 @@ function rowsToObjects(values) {
   }).filter((row) => Object.values(row).some((value) => String(value || "").trim()));
 }
 
+function splitFunnelSnapshotRows(rows) {
+  const gaRows = [];
+  const embRows = [];
+
+  rows.forEach((row) => {
+    const type = String(row.Type || "").trim().toLowerCase();
+
+    if (type === "ga") {
+      gaRows.push({
+        Date: row.Date || "",
+        "Landing Page": row["Landing Page"] || "",
+        "Landing Page + Query String": row["Landing Page + Query String"] || "",
+        Sessions: row.Sessions || "",
+        "Total Users": row["Total Users"] || "",
+        "Active Users": row["Active Users"] || "",
+        Views: row.Views || "",
+        "Engaged Sessions": row["Engaged Sessions"] || "",
+        "Source / Medium": row["Source / Medium"] || "",
+        Campaign: row.Campaign || "",
+        "Device Category": row["Device Category"] || "",
+      });
+    }
+
+    if (type === "emb") {
+      embRows.push({
+        "Received At": row.Date || "",
+        Event: row.Event || "",
+        "Page Key": row["Page Key"] || "",
+        "Contact ID": row["Contact ID"] || "",
+        "UTM Source": row["UTM Source"] || "",
+        "UTM Campaign": row["UTM Campaign"] || "",
+        "UTM Medium": row["UTM Medium"] || "",
+        "UTM Term": row["UTM Term"] || "",
+        "UTM Content": row["UTM Content"] || "",
+        URL: row.URL || "",
+      });
+    }
+  });
+
+  return { gaRows, embRows };
+}
+
 async function loadFromAppsScript() {
   const url = new URL(CONFIG.appsScriptUrl);
   url.searchParams.set("key", CONFIG.appsScriptSecret);
   url.searchParams.set("dataset", "funnel");
+  url.searchParams.set("columns", "funnel");
   let lastError = null;
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= CONFIG.appsScriptAttempts; attempt += 1) {
     try {
       const payload = await requestJson("GET", url.toString());
       if (payload.error) {
@@ -159,7 +208,7 @@ async function loadFromAppsScript() {
       return data;
     } catch (err) {
       lastError = err;
-      if (attempt < 3) await wait(700 * attempt);
+      if (attempt < CONFIG.appsScriptAttempts) await wait(700 * attempt);
     }
   }
 
@@ -182,13 +231,11 @@ async function loadSheetRange(accessToken, sheetName) {
 
 async function loadFromSheetsApi() {
   const accessToken = await getAccessToken();
-  const [gaRows, embRows] = await Promise.all([
-    loadSheetRange(accessToken, "ga_db"),
-    loadSheetRange(accessToken, "emb_db"),
-  ]);
+  const rows = await loadSheetRange(accessToken, CONFIG.funnelDataSheetName);
+  const splitRows = splitFunnelSnapshotRows(rows);
   return {
-    gaRows,
-    embRows,
+    gaRows: splitRows.gaRows,
+    embRows: splitRows.embRows,
     dataUpdatedAt: "",
     stale: false,
   };
