@@ -18,6 +18,9 @@ let tokenCache = null;
 let sheetTitleCache = null;
 let lastGoodReportingData = null;
 
+const DATE_FIELDS = ["Date", "Customer Sale Date", "Customer Lead Date", "Sale Date", "Lead Date"];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -155,6 +158,42 @@ function rowsToObjects(values) {
   }).filter((row) => Object.values(row).some((value) => String(value || "").trim()));
 }
 
+function isoFromParts(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function normalizeDateValue(value) {
+  if (value == null || value === "") return "";
+
+  const s = String(value).trim();
+  if (!s) return "";
+
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = Number(s);
+    if (serial > 20000 && serial < 80000) {
+      const d = new Date(Math.round((serial - 25569) * DAY_MS));
+      return isoFromParts(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    }
+  }
+
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return isoFromParts(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+
+  return value;
+}
+
+function normalizeReportingRows(rows) {
+  return (rows || []).map((row) => {
+    const next = Object.assign({}, row);
+    DATE_FIELDS.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(next, field)) {
+        next[field] = normalizeDateValue(next[field]);
+      }
+    });
+    return next;
+  });
+}
+
 async function loadReportingData() {
   if (CONFIG.appsScriptUrl && CONFIG.appsScriptSecret) {
     const url = new URL(CONFIG.appsScriptUrl);
@@ -171,7 +210,7 @@ async function loadReportingData() {
         }
 
         const data = {
-          rows: payload.rows || [],
+          rows: normalizeReportingRows(payload.rows || []),
           dataUpdatedAt: payload.dataUpdatedAt || "",
           stale: false,
         };
@@ -199,7 +238,7 @@ async function loadReportingData() {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(CONFIG.spreadsheetId)}/values/${encodeURIComponent(a1)}?majorDimension=ROWS`;
   const data = await requestJson("GET", url, { headers: { Authorization: `Bearer ${accessToken}` } });
   return {
-    rows: rowsToObjects(data.values || []),
+    rows: normalizeReportingRows(rowsToObjects(data.values || [])),
     dataUpdatedAt: "",
     stale: false,
   };
