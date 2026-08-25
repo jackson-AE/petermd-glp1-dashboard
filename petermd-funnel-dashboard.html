@@ -788,7 +788,7 @@ function renderDpCalendar(targetId,year,month,showPrev){
 function populateFilters(){
   const sources=[...new Set(AD_ROWS.map(r=>r.platform))].filter(Boolean).sort();
   $("sourceFilter").innerHTML='<option value="all">All platforms</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("");
-  const pages=[...new Set(GA_ROWS.map(rowPage).concat(EMB_ROWS.map(embPage)))].filter(Boolean).sort();
+  const pages=[...new Set(GA_ROWS.map(rowPage))].filter(Boolean).sort();
   $("pageFilter").innerHTML='<option value="all">All funnels</option>'+pages.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join("");
 }
 function filteredGa(){
@@ -800,9 +800,15 @@ function filteredGa(){
 }
 function filteredEmb(){
   const shouldFilterSource=state.view==="marketing";
+  const gaPages=state.view==="funnel"
+    ? new Set(GA_ROWS.filter(r=>dateInRange(gaDate(r))
+      &&(state.page==="all"||rowPage(r)===state.page)
+      &&searchHit(r)).map(rowPage))
+    : null;
   return EMB_ROWS.filter(r=>dateInRange(embDate(r))
     &&(!shouldFilterSource||state.source==="all"||sourceName(r["UTM Source"])===state.source)
     &&(state.page==="all"||embPage(r)===state.page)
+    &&(!gaPages||gaPages.has(embPage(r)))
     &&searchHit(r));
 }
 function adRowInRange(row,start,end){
@@ -842,9 +848,15 @@ function filteredGaFor(start,end){
 }
 function filteredEmbFor(start,end){
   const shouldFilterSource=state.view==="marketing";
+  const gaPages=state.view==="funnel"
+    ? new Set(GA_ROWS.filter(r=>dateInRangeFor(gaDate(r),start,end)
+      &&(state.page==="all"||rowPage(r)===state.page)
+      &&searchHit(r)).map(rowPage))
+    : null;
   return EMB_ROWS.filter(r=>dateInRangeFor(embDate(r),start,end)
     &&(!shouldFilterSource||state.source==="all"||sourceName(r["UTM Source"])===state.source)
     &&(state.page==="all"||embPage(r)===state.page)
+    &&(!gaPages||gaPages.has(embPage(r)))
     &&searchHit(r));
 }
 function summarizeAds(rows,start=state.start,end=state.end){
@@ -1151,7 +1163,6 @@ function buildFunnelRows(ga,emb){
     const page=rowPage(r), o=map.get(page)||{page,sessions:0,sources:new Set()};
     o.sessions+=num(r.Sessions);o.sources.add(sourceName(r["Source / Medium"]));map.set(page,o);
   });
-  embByPage.forEach((count,page)=>{if(!map.has(page))map.set(page,{page,sessions:0,sources:new Set()})});
   const baseRows=[...map.values()].map((o,index)=>({
     ...o,
     observedStarts:embByPage.get(o.page)||0,
