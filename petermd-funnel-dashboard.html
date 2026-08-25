@@ -1186,6 +1186,7 @@ function buildFunnelRows(ga,emb){
       aov:purchases?revenue/purchases:null
     };
   }).sort((a,b)=>b.sessions-a.sessions);
+  return rows;
 }
 function summarizeFunnelRows(rows){
   const totals=rows.reduce((acc,row)=>{
