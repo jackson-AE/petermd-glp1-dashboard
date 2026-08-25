@@ -792,14 +792,16 @@ function populateFilters(){
   $("pageFilter").innerHTML='<option value="all">All funnels</option>'+pages.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join("");
 }
 function filteredGa(){
+  const shouldFilterSource=state.view==="marketing";
   return GA_ROWS.filter(r=>dateInRange(gaDate(r))
-    &&(state.source==="all"||sourceName(r["Source / Medium"])===state.source)
+    &&(!shouldFilterSource||state.source==="all"||sourceName(r["Source / Medium"])===state.source)
     &&(state.page==="all"||rowPage(r)===state.page)
     &&searchHit(r));
 }
 function filteredEmb(){
+  const shouldFilterSource=state.view==="marketing";
   return EMB_ROWS.filter(r=>dateInRange(embDate(r))
-    &&(state.source==="all"||sourceName(r["UTM Source"])===state.source)
+    &&(!shouldFilterSource||state.source==="all"||sourceName(r["UTM Source"])===state.source)
     &&(state.page==="all"||embPage(r)===state.page)
     &&searchHit(r));
 }
@@ -815,8 +817,9 @@ function adRowInRange(row,start,end){
     (hasPurchaseMetric&&dateInRangeFor(saleDate,start,end));
 }
 function filteredAdsFor(start,end){
+  const shouldFilterSource=state.view==="marketing";
   return AD_ROWS.filter(row=>adRowInRange(row,start,end)
-    &&(state.source==="all"||row.platform===state.source)
+    &&(!shouldFilterSource||state.source==="all"||row.platform===state.source)
     &&searchHit(row));
 }
 function filteredAds(){
@@ -831,14 +834,16 @@ function summarize(ga,emb){
   return {sessions,users,views,engaged,quiz,cvr:sessions?quiz/sessions:0,engRate:sessions?engaged/sessions:0};
 }
 function filteredGaFor(start,end){
+  const shouldFilterSource=state.view==="marketing";
   return GA_ROWS.filter(r=>dateInRangeFor(gaDate(r),start,end)
-    &&(state.source==="all"||sourceName(r["Source / Medium"])===state.source)
+    &&(!shouldFilterSource||state.source==="all"||sourceName(r["Source / Medium"])===state.source)
     &&(state.page==="all"||rowPage(r)===state.page)
     &&searchHit(r));
 }
 function filteredEmbFor(start,end){
+  const shouldFilterSource=state.view==="marketing";
   return EMB_ROWS.filter(r=>dateInRangeFor(embDate(r),start,end)
-    &&(state.source==="all"||sourceName(r["UTM Source"])===state.source)
+    &&(!shouldFilterSource||state.source==="all"||sourceName(r["UTM Source"])===state.source)
     &&(state.page==="all"||embPage(r)===state.page)
     &&searchHit(r));
 }
