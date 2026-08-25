@@ -1051,24 +1051,19 @@ function bigFunnelChart(hostId,metric){
 }
 function funnelMetricData(ga,emb){
   const s=summarize(ga,emb);
-  const ad=summarizeAds(filteredAds());
-  const funnelStarts=DEMO_MODE?Math.max(s.quiz,Math.round(ad.clicks*.16)):s.quiz;
-  ad.funnelStarts=funnelStarts;
-  ad.startRate=ad.clicks?funnelStarts/ad.clicks:null;
-  ad.funnelPurCvr=funnelStarts?ad.purchases/funnelStarts:null;
-  const funnelOptinRate=ad.funnelStarts&&ad.leads?ad.leads/ad.funnelStarts:0;
-  const daily=dailySummary(ga,emb);
+  const funnelTotals=summarizeFunnelRows(buildFunnelRows(ga,emb));
+  const daily=dailyFunnelRows(dailySummary(ga,emb),funnelTotals);
   const dates=daily.map(x=>shortDate(x.d));
-  const aovSeries=daily.map(x=>x.purchases&&ad.aov?ad.aov:0);
+  const aovSeries=daily.map(x=>x.funnelPurchases&&funnelTotals.aov?funnelTotals.aov:0);
   return [
     {key:"pageVisits",label:"Page Visits",value:fmt(s.sessions),sub:"Unique users "+fmt(s.users),color:"#8b5cf6",series:daily.map(x=>x.sessions),format:fmt,dates},
-    {key:"funnelStarts",label:"Funnel Starts",value:fmt(ad.funnelStarts),sub:"Start Rate "+pct2(ad.startRate||0),color:"#6366f1",series:daily.map(x=>x.quiz),format:fmt,dates},
-    {key:"startRate",label:"Start Rate",value:ad.startRate==null?"-":pct2(ad.startRate),sub:"Clicks to start",color:"#3b82f6",series:daily.map(x=>x.startRate),format:pct2,adaptive:true,dates},
-    {key:"funnelLeads",label:"Leads",value:fmt(ad.leads),sub:"Optin Rate "+pct2(funnelOptinRate),color:"#06b6d4",series:daily.map(x=>x.leads),format:fmt,dates},
-    {key:"optinRate",label:"Optin Rate",value:pct2(funnelOptinRate),sub:"Starts to leads",color:"#14b8a6",series:daily.map(x=>x.quiz?x.leads/x.quiz:0),format:pct2,adaptive:true,dates},
-    {key:"funnelPurchase",label:"Purchase",value:fmt(ad.purchases),sub:"Total purchases",color:"#8b5cf6",series:daily.map(x=>x.purchases),format:fmt,dates},
-    {key:"funnelPurCvr",label:"Funnel CVR",value:ad.funnelPurCvr==null?"-":pct(ad.funnelPurCvr),sub:"Starts to purchase",color:"#06b6d4",series:daily.map(x=>x.funnelPurCvr),format:pct,adaptive:true,dates},
-    {key:"aov",label:"AOV",value:ad.aov==null?"-":money2(ad.aov),sub:"Revenue per purchase",color:"#a3e635",series:aovSeries,format:money2,dates},
+    {key:"funnelStarts",label:"Funnel Starts",value:fmt(funnelTotals.funnelStarts),sub:"Start Rate "+pct2(funnelTotals.startRate||0),color:"#6366f1",series:daily.map(x=>x.funnelStarts),format:fmt,dates},
+    {key:"startRate",label:"Start Rate",value:pct2(funnelTotals.startRate||0),sub:"Visits to start",color:"#3b82f6",series:daily.map(x=>x.startRate),format:pct2,adaptive:true,dates},
+    {key:"funnelLeads",label:"Leads",value:fmt(funnelTotals.leads),sub:"Optin Rate "+pct2(funnelTotals.optinRate||0),color:"#06b6d4",series:daily.map(x=>x.funnelLeads),format:fmt,dates},
+    {key:"optinRate",label:"Optin Rate",value:pct2(funnelTotals.optinRate||0),sub:"Starts to leads",color:"#14b8a6",series:daily.map(x=>x.optinRate),format:pct2,adaptive:true,dates},
+    {key:"funnelPurchase",label:"Purchase",value:fmt(funnelTotals.purchases),sub:"Total purchases",color:"#8b5cf6",series:daily.map(x=>x.funnelPurchases),format:fmt,dates},
+    {key:"funnelPurCvr",label:"Funnel CVR",value:pct(funnelTotals.funnelCvr||0),sub:"Starts to purchase",color:"#06b6d4",series:daily.map(x=>x.funnelCvr),format:pct,adaptive:true,dates},
+    {key:"aov",label:"AOV",value:funnelTotals.aov==null?"-":money2(funnelTotals.aov),sub:"Revenue per purchase",color:"#a3e635",series:aovSeries,format:money2,dates},
   ];
 }
 function renderFunnelAnalytics(ga,emb){
@@ -1148,7 +1143,7 @@ function points(values,w,h,pad){
   return values.map((v,i)=>[pad+i*step,h-pad-(v/max)*(h-pad*2)]);
 }
 function pathFrom(points){return points.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ")}
-function renderLandingTable(ga,emb){
+function buildFunnelRows(ga,emb){
   const embByPage=new Map();
   emb.forEach(r=>{const p=embPage(r);embByPage.set(p,(embByPage.get(p)||0)+1)});
   const map=new Map();
@@ -1162,23 +1157,70 @@ function renderLandingTable(ga,emb){
     observedStarts:embByPage.get(o.page)||0,
     demoIndex:index
   }));
+  const ad=summarizeAds(filteredAds());
+  const sessionTotal=baseRows.reduce((sum,row)=>sum+(row.sessions||0),0);
+  const startTotal=baseRows.reduce((sum,row)=>sum+(row.observedStarts||0),0);
+  const rowCount=baseRows.length||1;
+  let leadRemaining=ad.leads||0;
+  let purchaseRemaining=ad.purchases||0;
+  let revenueRemaining=ad.revenue||0;
   const rows=baseRows.map((o,index)=>{
-    const startRateBase=Math.max(.018,.082-index*.012);
-    const funnelStarts=Math.max(o.observedStarts,Math.round(o.sessions*startRateBase));
-    const leads=Math.round(funnelStarts*Math.max(.52,.74-index*.05));
-    const purchases=Math.round(leads*Math.max(.055,.095-index*.012));
-    const revenue=purchases*(195+index*18);
+    const funnelStarts=o.observedStarts||0;
+    const isLast=index===baseRows.length-1;
+    const share=sessionTotal?((o.sessions||0)/sessionTotal):(startTotal?funnelStarts/startTotal:1/rowCount);
+    const leads=isLast?leadRemaining:Math.round((ad.leads||0)*share);
+    const purchases=isLast?purchaseRemaining:Math.round((ad.purchases||0)*share);
+    const revenue=isLast?revenueRemaining:(ad.revenue||0)*share;
+    leadRemaining-=leads;
+    purchaseRemaining-=purchases;
+    revenueRemaining-=revenue;
     return {
       ...o,
       funnelStarts,
       leads,
       purchases,
+      revenue,
       startRate:o.sessions?funnelStarts/o.sessions:0,
       optinRate:funnelStarts?leads/funnelStarts:0,
       funnelCvr:funnelStarts?purchases/funnelStarts:0,
       aov:purchases?revenue/purchases:null
     };
   }).sort((a,b)=>b.sessions-a.sessions);
+}
+function summarizeFunnelRows(rows){
+  const totals=rows.reduce((acc,row)=>{
+    acc.sessions+=row.sessions||0;
+    acc.funnelStarts+=row.funnelStarts||0;
+    acc.leads+=row.leads||0;
+    acc.purchases+=row.purchases||0;
+    acc.revenue+=row.revenue||0;
+    return acc;
+  },{sessions:0,funnelStarts:0,leads:0,purchases:0,revenue:0});
+  totals.startRate=totals.sessions?totals.funnelStarts/totals.sessions:0;
+  totals.optinRate=totals.funnelStarts?totals.leads/totals.funnelStarts:0;
+  totals.funnelCvr=totals.funnelStarts?totals.purchases/totals.funnelStarts:0;
+  totals.aov=totals.purchases?totals.revenue/totals.purchases:null;
+  return totals;
+}
+function dailyFunnelRows(daily,totals){
+  return daily.map(row=>{
+    const starts=row.quiz||0;
+    const leads=row.leads||0;
+    const purchases=row.purchases||0;
+    return {
+      ...row,
+      funnelStarts:starts,
+      funnelLeads:leads,
+      funnelPurchases:purchases,
+      startRate:row.sessions?starts/row.sessions:0,
+      optinRate:starts?leads/starts:0,
+      funnelCvr:starts?purchases/starts:0,
+      aov:purchases?row.revenue/purchases:0
+    };
+  });
+}
+function renderLandingTable(ga,emb){
+  const rows=buildFunnelRows(ga,emb);
   $("landingTable").innerHTML='<thead><tr><th>Funnel</th><th>Page Visits</th><th>Funnel Start</th><th>Start Rate</th><th>Leads</th><th>Optin Rate</th><th>Purchase</th><th>Funnel CVR</th><th>AOV</th></tr></thead><tbody>'+
     (rows.length?rows.map(r=>`<tr><td class="text-cell">${esc(r.page)}</td><td>${fmt(r.sessions)}</td><td>${fmt(r.funnelStarts)}</td><td>${pct2(r.startRate)}</td><td>${fmt(r.leads)}</td><td>${pct2(r.optinRate)}</td><td>${fmt(r.purchases)}</td><td>${pct2(r.funnelCvr)}</td><td>${r.aov==null?"-":money2(r.aov)}</td></tr>`).join(""):'<tr><td colspan="9" class="empty">No funnel rows for this selection</td></tr>')+
     '</tbody>';
