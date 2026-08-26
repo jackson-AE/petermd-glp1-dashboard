@@ -514,8 +514,24 @@ function normalizeOffer(value,fallbackText=""){
 function gaDate(row){return parseDate(row.Date)}
 function embDate(row){return parseDate(row["Received At"])}
 function adDate(row){return parseDate(row.Date)}
-function rowPage(row){return String(row["Landing Page"]||row.URL||"").trim()||"(Unknown page)"}
-function embPage(row){const url=String(row.URL||"");try{return new URL(url,location.origin).pathname}catch(e){return url||"(Unknown page)"}}
+function normalizePageKey(value){
+  const raw=String(value||"").trim();
+  if(!raw)return "";
+  try{
+    const url=new URL(raw,location.origin);
+    const path=String(url.pathname||"/").replace(/\/+$/,"");
+    return path||"/";
+  }catch(e){
+    const path=raw.split("?")[0].split("#")[0].trim().replace(/\/+$/,"");
+    return path||raw;
+  }
+}
+function rowPage(row){
+  return normalizePageKey(row["Landing Page"]||row["Landing Page + Query String"]||row.URL||row["Page Key"])||"(Unknown page)";
+}
+function embPage(row){
+  return normalizePageKey(row.URL||row["Page Key"])||"(Unknown page)";
+}
 function dateInRange(date){return date&&date>=state.start&&date<=state.end}
 function dateInRangeFor(date,start,end){return date&&date>=start&&date<=end}
 function searchHit(row){
@@ -789,7 +805,9 @@ function populateFilters(){
   const sources=[...new Set(AD_ROWS.map(r=>r.platform))].filter(Boolean).sort();
   $("sourceFilter").innerHTML='<option value="all">All platforms</option>'+sources.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("");
   const pages=[...new Set(GA_ROWS.map(rowPage))].filter(Boolean).sort();
+  if(state.page!=="all"&&!pages.includes(state.page))state.page="all";
   $("pageFilter").innerHTML='<option value="all">All funnels</option>'+pages.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join("");
+  $("pageFilter").value=state.page;
 }
 function filteredGa(){
   const shouldFilterSource=state.view==="marketing";
